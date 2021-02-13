@@ -24,7 +24,7 @@ import json
 import aiohttp
 from requests.auth import HTTPBasicAuth
 import icinga2_exporter.log as log
-
+import re
 
 class Singleton(type):
     """
@@ -108,11 +108,12 @@ class MonitorConfig(object, metaclass=Singleton):
     def get_perfname_to_label(self):
         return self.perfname_to_label
 
-    def get_perfdata(self, hostname):
+    def get_perfdata(self, objects):
         # Get performance data from Monitor and return in json format
-        body = {"joins": ["host.vars"],
-                "attrs": ["__name", "display_name", "check_command", "last_check_result", "vars", "host_name"],
-                "filter": 'service.host_name==\"{}\"'.format(hostname)}
+        #body = {"joins": ["host.vars"],
+        #        "attrs": ["__name", "display_name", "check_command", "last_check_result", "vars", "host_name"],
+        #        "filter": 'service.host_name==\"{}\"'.format(hostname)}
+        body = { "attrs": ["__name", "display_name", "check_command", "last_check_result", "host_name"] }
 
         data_json = self.post(self.url_query_service_perfdata, body)
 
@@ -145,23 +146,37 @@ class MonitorConfig(object, metaclass=Singleton):
         return data_json
 
 
-    async def async_get_perfdata(self, hostname):
-        # Get performance data from Monitor and return in json format
-        body = {"joins": ["host.vars"],
-                "attrs": ["__name", "display_name", "check_command", "last_check_result", "vars", "host_name"],
-                "filter": 'service.host_name==\"{}\"'.format(hostname)}
-
-        data_json = await self.async_post(self.url_query_service_perfdata, body)
-
-        if not data_json:
-            log.warn('Received no perfdata from Icinga2')
-
-        return data_json
+    async def async_get_perfdata(self, objects):
+        data_json_arr = []
+        for key in objects.keys():
+            if "type" not in objects[key]:
+                continue
+            url_query_perfdata = self.host + "/v1/objects/" + objects[key]["type"]
+            body = { "attrs": ["__name", "display_name", "check_command", "last_check_result", "host_name"] }
+            if "filter" in objects[key]:
+                body["filter"] = objects[key]["filter"]
+            data_json = await self.async_post(url_query_perfdata, body)
+            if not data_json:
+                log.debug('Received no perfdata from Icinga2')
+            else:
+                log.debug('OK, received perfdata from icinga2')
+                data_json_arr.append(data_json)
+        if key not in objects.keys():
+            body = { "attrs": ["__name", "display_name", "check_command", "last_check_result", "host_name"] }
+            data_json = await self.async_post(self.url_query_service_perfdata, body)
+            if not data_json:
+                log.warn('Received no perfdata from Icinga2')
+            else:
+                data_json_arr.append(data_json)
+            
+        log.debug("Size of data_json_arr: " + str(len(data_json_arr)))
+        return data_json_arr
 
 
     async def async_post(self, url, body):
         data_json = {}
         try:
+            log.debug('POST body: <<' + json.dumps(body) + '>>')
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, auth=aiohttp.BasicAuth(self.user, self.passwd),
                                         verify_ssl=False,
@@ -172,3 +187,4 @@ class MonitorConfig(object, metaclass=Singleton):
                     return json.loads(re)
         finally:
             pass
+

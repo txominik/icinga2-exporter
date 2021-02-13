@@ -27,6 +27,8 @@ from icinga2_exporter.perfdata import Perfdata
 import icinga2_exporter.monitorconnection as monitorconnection
 import icinga2_exporter.log as log
 
+import re
+
 #app = Quart( __name__)
 app = Blueprint( 'icinga2',__name__)
 total_requests = Counter('requests', 'Total requests to monitor-exporter endpoint')
@@ -38,17 +40,23 @@ def hello_world():
 
 @app.route("/metrics", methods=['GET'])
 async def get_ametrics():
-    log.info(request.url)
-    target = request.args.get('target')
+    objects = {}
+    for key in request.args.keys():
+        if re.match("^([^0-9]+)([0-9]+)$", key):
+            r = re.search("^([^0-9]+)([0-9]+)$", key)
+            if r.group(2) in objects.keys():
+                objects[r.group(2)][r.group(1)] = request.args.get(key)
+            else:
+                objects[r.group(2)] = { r.group(1): request.args.get(key) }
 
-    log.info('Collect metrics', {'target': target})
-
-    monitor_data = Perfdata(monitorconnection.MonitorConfig(), target)
+    monitor_data = Perfdata(monitorconnection.MonitorConfig(), objects)
 
     # Fetch performance data from Monitor
     await asyncio.get_event_loop().create_task(monitor_data.get_perfdata())
 
     target_metrics = monitor_data.prometheus_format()
+    #with open("/tmp/icinga2_exporter_targetmetrics", "a") as f:
+    #    f.write(target_metrics)
 
     resp = Response(target_metrics)
     resp.headers['Content-Type'] = CONTENT_TYPE_LATEST
@@ -75,3 +83,4 @@ def chech_healthy() -> Response:
     resp = jsonify({'status': 'ok'})
     resp.status_code = 200
     return resp
+

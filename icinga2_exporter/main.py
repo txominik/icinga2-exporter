@@ -96,3 +96,4 @@ def list_routes(app):
     for rule in app.url_map.iter_rules():
         print("route")
         print (rule)
+
